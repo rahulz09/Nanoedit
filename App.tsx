@@ -814,27 +814,6 @@ function App() {
       <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 z-50 transition-all duration-500 ${uiVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
         <div className="bg-nano-card/90 backdrop-blur-xl border border-zinc-800 p-2 rounded-2xl shadow-2xl flex flex-col gap-2">
           
-          {/* Preset Quick Actions */}
-          <div className="flex items-center gap-1.5 px-1 overflow-x-auto no-scrollbar">
-              {PRESET_PROMPTS.map((preset, idx) => (
-                  <button
-                      key={idx}
-                      onClick={() => {
-                          setPrompt(preset.prompt);
-                          if (preset.label.includes('BG') && sourceImages.length === 0) {
-                              setGlobalError("Upload an image first to change background.");
-                              setIsImageMode(true);
-                          }
-                      }}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800/50 hover:bg-zinc-700 border border-zinc-700/50 rounded-lg text-[11px] font-medium text-zinc-300 transition-all shrink-0 hover:text-white hover:border-zinc-600"
-                      title={preset.prompt.slice(0, 80) + '...'}
-                  >
-                      <span>{preset.icon}</span>
-                      <span>{preset.label}</span>
-                  </button>
-              ))}
-          </div>
-
           <div className="flex items-center gap-2 p-1">
               <div className="flex-1 relative">
                   <input 
@@ -906,6 +885,34 @@ function App() {
                       <IconCamera />
                       <select value={settings.cameraAngle} onChange={(e) => setSettings(prev => ({...prev, cameraAngle: e.target.value}))} className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-24">
                           {CAMERA_ANGLES.map(angle => (<option key={angle.value} value={angle.value} className="bg-zinc-900 text-white">{angle.label}</option>))}
+                      </select>
+                  </div>
+
+                  {/* Quick Actions Dropdown */}
+                  <div className="flex items-center gap-2 bg-nano-accent/10 rounded-lg px-3 py-1.5 border border-nano-accent/30 shrink-0">
+                      <IconSparkles />
+                      <select 
+                          value="" 
+                          onChange={(e) => {
+                              if (e.target.value) {
+                                  const preset = PRESET_PROMPTS.find(p => p.label === e.target.value);
+                                  if (preset) {
+                                      setPrompt(preset.prompt);
+                                      if (preset.label.includes('BG') && sourceImages.length === 0) {
+                                          setGlobalError("Upload an image first to change background.");
+                                          setIsImageMode(true);
+                                      }
+                                  }
+                              }
+                          }} 
+                          className="bg-transparent text-xs font-medium text-nano-accent outline-none cursor-pointer w-24"
+                      >
+                          <option value="" className="bg-zinc-900 text-white">Quick Actions</option>
+                          {PRESET_PROMPTS.map(preset => (
+                              <option key={preset.label} value={preset.label} className="bg-zinc-900 text-white">
+                                  {preset.icon} {preset.label}
+                              </option>
+                          ))}
                       </select>
                   </div>
 
