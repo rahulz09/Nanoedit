@@ -201,10 +201,21 @@ export const editImageWithGemini = async (
 
   } catch (error: any) {
     console.error("Gemini API Error:", error);
-    // Enhance error message for common 500 issues
-    if (error.message && error.message.includes("500")) {
-        throw new Error("Server Error (500). The image might be too complex or the server is busy. Try reducing complexity or trying again.");
+    const errMsg = error.message || String(error);
+    
+    // Handle common errors with user-friendly messages
+    if (errMsg.includes("500")) {
+        throw new Error("Server Error (500). The image might be too complex or the server is busy. Try again.");
     }
-    throw new Error(error.message || "Failed to generate image");
+    if (errMsg.includes("Load failed") || errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")) {
+        throw new Error("Network error. Check your internet connection and try again.");
+    }
+    if (errMsg.includes("401") || errMsg.includes("403") || errMsg.includes("API key")) {
+        throw new Error("API key invalid or expired. Please reconnect your API key.");
+    }
+    if (errMsg.includes("429") || errMsg.includes("quota")) {
+        throw new Error("Rate limit exceeded. Wait a moment and try again.");
+    }
+    throw new Error(errMsg || "Failed to generate image");
   }
 };

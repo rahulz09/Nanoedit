@@ -665,12 +665,6 @@ function App() {
             <div className="w-8 h-8 bg-nano-accent rounded-full flex items-center justify-center text-nano-bg font-bold">N</div>
             <span className="font-semibold text-lg tracking-tight">Nano Edit</span>
         </div>
-        <div className="flex items-center gap-3 text-[10px] text-zinc-500">
-            <span className="hidden md:flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700">⌘.</kbd> UI</span>
-            <span className="hidden md:flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700">⌘U</kbd> Upload</span>
-            <span className="hidden lg:flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700">⌘S</kbd> Save</span>
-            <span className="hidden lg:flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700">⌘B</kbd> Remove BG</span>
-        </div>
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-start relative w-full max-w-7xl mx-auto px-4 pb-48 pt-4">
