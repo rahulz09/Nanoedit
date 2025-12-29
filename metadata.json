@@ -1,0 +1,5 @@
+{
+  "name": "Nano Edit",
+  "description": "A high-performance AI image editor powered by Gemini 2.5 Flash and Pro models. Edit images using natural language prompts with control over aspect ratio and resolution.",
+  "requestFramePermissions": []
+}
