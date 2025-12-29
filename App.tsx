@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { editImageWithGemini } from './services/geminiService';
 import { saveToIndexedDB, getFromIndexedDB, saveToLocalStorage, getFromLocalStorage, STORAGE_KEYS } from './services/storageService';
-import { EditorSettings, GeneratedImage, QueueItem, ASPECT_RATIOS, RESOLUTIONS, STYLES, CAMERA_ANGLES } from './types';
+import { EditorSettings, GeneratedImage, QueueItem, ASPECT_RATIOS, RESOLUTIONS, STYLES, CAMERA_ANGLES, PRESET_PROMPTS } from './types';
 import { IconUpload, IconSparkles, IconAspectRatio, IconX, IconDownload, IconPalette, IconToggleLeft, IconToggleRight, IconLayers, IconEye, IconLayerPlus, IconZip, IconEyeOff, IconEraser, IconTrash, IconZoomIn, IconZoomOut, IconSettings, IconCamera } from './components/Icons';
 // @ts-ignore
 import JSZip from 'jszip';
@@ -305,7 +305,7 @@ function App() {
     }
   };
 
-  const addToQueue = (currentPrompt: string, overrideSettings?: Partial<EditorSettings>) => {
+  const addToQueue = useCallback((currentPrompt: string, overrideSettings?: Partial<EditorSettings>) => {
       if (!currentPrompt.trim()) return;
 
       const effectiveSettings = { ...settings, ...overrideSettings };
@@ -329,11 +329,11 @@ function App() {
       if (!overrideSettings) {
           setPrompt("");
       }
-  };
+  }, [settings, isImageMode, sourceImages]);
 
   const handleGenerate = useCallback(() => {
     addToQueue(prompt);
-  }, [prompt, isImageMode, sourceImages, settings]);
+  }, [prompt, addToQueue]);
 
   const handleRemoveBackground = () => {
       if (!isImageMode || sourceImages.length === 0) {
@@ -562,14 +562,16 @@ function App() {
       initialPinchDistanceRef.current = null;
   };
 
-  // Keyboard Shortcuts
+  // Keyboard Shortcuts - Apple Magic Keyboard compatible
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+        // Cmd/Ctrl + Enter: Generate
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             if (prompt.trim()) {
                 handleGenerate();
             }
         }
+        // Escape: Close viewer or clear images
         if (e.key === 'Escape') {
            if (viewedImage) {
                setViewedImage(null);
@@ -577,21 +579,59 @@ function App() {
                clearAllSourceImages();
            }
         }
+        // Cmd/Ctrl + S: Save/Download first image
         if ((e.ctrlKey || e.metaKey) && e.key === 's') {
             e.preventDefault(); 
             if (generatedImages.length > 0) {
                 downloadImage(generatedImages[0].url);
             }
         }
+        // Cmd/Ctrl + .: Toggle UI
         if ((e.ctrlKey || e.metaKey) && e.key === '.') {
             e.preventDefault();
             setUiVisible(prev => !prev);
+        }
+        // Cmd/Ctrl + U: Upload image
+        if ((e.ctrlKey || e.metaKey) && e.key === 'u') {
+            e.preventDefault();
+            triggerFileUpload();
+        }
+        // Cmd/Ctrl + I: Toggle Image Mode
+        if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
+            e.preventDefault();
+            setIsImageMode(prev => !prev);
+        }
+        // Cmd/Ctrl + Shift + S: Download all as ZIP
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 's') {
+            e.preventDefault();
+            if (generatedImages.length > 0) {
+                handleDownloadAll();
+            }
+        }
+        // Cmd/Ctrl + B: Remove background (white)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+            e.preventDefault();
+            if (isImageMode && sourceImages.length > 0) {
+                handleRemoveBackground();
+            }
+        }
+        // Cmd/Ctrl + K: Clear prompt
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            setPrompt('');
+        }
+        // Cmd/Ctrl + D: Duplicate last generated to layers
+        if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+            e.preventDefault();
+            if (generatedImages.length > 0) {
+                addToLayers(generatedImages[0].url);
+            }
         }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleGenerate, prompt, generatedImages, viewedImage]);
+  }, [handleGenerate, prompt, generatedImages, viewedImage, isImageMode, sourceImages]);
 
 
   if (isCheckingKey || isRestoring) {
@@ -625,8 +665,11 @@ function App() {
             <div className="w-8 h-8 bg-nano-accent rounded-full flex items-center justify-center text-nano-bg font-bold">N</div>
             <span className="font-semibold text-lg tracking-tight">Nano Edit</span>
         </div>
-        <div className="flex items-center gap-4 text-xs text-zinc-500">
-            <span className="hidden sm:inline">Cmd/Ctrl + . to toggle UI</span>
+        <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+            <span className="hidden md:flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700">⌘.</kbd> UI</span>
+            <span className="hidden md:flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700">⌘U</kbd> Upload</span>
+            <span className="hidden lg:flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700">⌘S</kbd> Save</span>
+            <span className="hidden lg:flex items-center gap-1"><kbd className="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700">⌘B</kbd> Remove BG</span>
         </div>
       </header>
 
@@ -771,6 +814,27 @@ function App() {
       <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 z-50 transition-all duration-500 ${uiVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
         <div className="bg-nano-card/90 backdrop-blur-xl border border-zinc-800 p-2 rounded-2xl shadow-2xl flex flex-col gap-2">
           
+          {/* Preset Quick Actions */}
+          <div className="flex items-center gap-1.5 px-1 overflow-x-auto no-scrollbar">
+              {PRESET_PROMPTS.map((preset, idx) => (
+                  <button
+                      key={idx}
+                      onClick={() => {
+                          setPrompt(preset.prompt);
+                          if (preset.label.includes('BG') && sourceImages.length === 0) {
+                              setGlobalError("Upload an image first to change background.");
+                              setIsImageMode(true);
+                          }
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800/50 hover:bg-zinc-700 border border-zinc-700/50 rounded-lg text-[11px] font-medium text-zinc-300 transition-all shrink-0 hover:text-white hover:border-zinc-600"
+                      title={preset.prompt.slice(0, 80) + '...'}
+                  >
+                      <span>{preset.icon}</span>
+                      <span>{preset.label}</span>
+                  </button>
+              ))}
+          </div>
+
           <div className="flex items-center gap-2 p-1">
               <div className="flex-1 relative">
                   <input 

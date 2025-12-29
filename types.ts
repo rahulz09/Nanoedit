@@ -55,6 +55,45 @@ export const STYLES = [
   { label: 'Cyberpunk', value: 'Cyberpunk' },
   { label: 'Watercolor', value: 'Watercolor' },
   { label: '3D Render', value: '3D Render' },
+  { label: 'Handwritten Notes', value: 'Handwritten Notes' },
+  { label: 'Black Background', value: 'Black Background' },
+  { label: 'White Background', value: 'White Background' },
+  { label: 'Minimalist', value: 'Minimalist' },
+  { label: 'Sketch', value: 'Sketch' },
+  { label: 'Neon Glow', value: 'Neon Glow' },
+];
+
+export const PRESET_PROMPTS = [
+  {
+    label: 'Study Notes',
+    icon: '📝',
+    prompt: 'Create a handwritten-style study note. Use a messy but readable student-style handwriting on lined notebook paper. Highlight all key terms with a yellow neon marker and circle any dates or numbers in red. Add small, simple doodles or sketches to explain concepts visually. Make sure the entire layout fits on a single A4-size printable page with good spacing, clear sections, and a neat heading. Include arrows, boxes, and mini callouts wherever helpful to improve memory recall.',
+  },
+  {
+    label: 'White BG',
+    icon: '⬜',
+    prompt: 'Edit this image: Replace the background with a clean pure white color (#FFFFFF). Keep the main subject exactly identical pixel-for-pixel. Do not regenerate or modify the subject.',
+  },
+  {
+    label: 'Black BG',
+    icon: '⬛',
+    prompt: 'Edit this image: Replace the background with a pure black color (#000000). Keep the main subject exactly identical pixel-for-pixel. Do not regenerate or modify the subject.',
+  },
+  {
+    label: 'Transparent BG',
+    icon: '🔲',
+    prompt: 'Edit this image: Remove the background completely, making it transparent. Keep the main subject with clean edges exactly as it is. Do not modify or regenerate the subject.',
+  },
+  {
+    label: 'Enhance',
+    icon: '✨',
+    prompt: 'Enhance this image: Improve quality, sharpness, color balance, and overall visual appeal while preserving the original content and composition.',
+  },
+  {
+    label: 'Upscale',
+    icon: '🔍',
+    prompt: 'Upscale this image to higher resolution while maintaining sharpness and adding fine details. Keep the original style and content intact.',
+  },
 ];
 
 export const CAMERA_ANGLES = [
