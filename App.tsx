@@ -437,14 +437,24 @@ function App() {
     setViewedImage(imageUrl);
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!brushMode || !canvasRef.current) return;
     setIsDrawing(true);
     
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    
+    let clientX: number, clientY: number;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    
+    const x = (clientX - rect.left) * (canvas.width / rect.width);
+    const y = (clientY - rect.top) * (canvas.height / rect.height);
     
     if (brushTool === 'brush') {
       const ctx = canvas.getContext('2d');
@@ -461,13 +471,23 @@ function App() {
     }
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDrawing || !brushMode || !canvasRef.current) return;
     
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    
+    let clientX: number, clientY: number;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    
+    const x = (clientX - rect.left) * (canvas.width / rect.width);
+    const y = (clientY - rect.top) * (canvas.height / rect.height);
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -594,6 +614,8 @@ function App() {
 
   // Wheel Zoom with Zoom-To-Cursor Logic
   const handleWheel = (e: React.WheelEvent) => {
+      if (brushMode) return; // Disable zoom when brush is active
+      
       e.stopPropagation();
       e.preventDefault();
 
@@ -655,13 +677,19 @@ function App() {
 
   const handleTouchStart = (e: React.TouchEvent) => {
       e.stopPropagation(); // Stop propagation to prevent closing viewer
-      if (e.touches.length === 1 && zoom > 1) {
-          // Single touch pan
-          setIsDragging(true);
-          const touch = e.touches[0];
-          dragStartRef.current = { x: touch.clientX - pan.x, y: touch.clientY - pan.y };
+      
+      if (e.touches.length === 1) {
+          if (brushMode) {
+              // Single touch for brush in brush mode
+              return; // Let brush handler take over
+          } else if (zoom > 1) {
+              // Single touch pan when not in brush mode
+              setIsDragging(true);
+              const touch = e.touches[0];
+              dragStartRef.current = { x: touch.clientX - pan.x, y: touch.clientY - pan.y };
+          }
       } else if (e.touches.length === 2) {
-          // Pinch Zoom Start
+          // Two-finger pinch zoom (works in brush mode too)
           const dist = getPinchDistance(e.touches);
           initialPinchDistanceRef.current = dist;
           initialZoomRef.current = zoom;
@@ -672,13 +700,18 @@ function App() {
       e.stopPropagation();
       // e.preventDefault(); // Removed to allow potential browser gestures if needed, but relying on touch-action: none CSS
 
-      if (e.touches.length === 1 && isDragging && zoom > 1) {
-           // Single touch pan
-           const touch = e.touches[0];
-           setPan({
-              x: touch.clientX - dragStartRef.current.x,
-              y: touch.clientY - dragStartRef.current.y
-           });
+      if (e.touches.length === 1) {
+          if (brushMode) {
+              // Single touch for brush - let brush handler take over
+              return;
+          } else if (isDragging && zoom > 1) {
+              // Single touch pan when not in brush mode
+              const touch = e.touches[0];
+              setPan({
+                  x: touch.clientX - dragStartRef.current.x,
+                  y: touch.clientY - dragStartRef.current.y
+              });
+          }
       } else if (e.touches.length === 2 && initialPinchDistanceRef.current) {
            // Pinch Zoom Move
            const dist = getPinchDistance(e.touches);
@@ -818,7 +851,7 @@ function App() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-start relative w-full max-w-7xl mx-auto px-4 pb-48 pt-4">
+      <main className="flex-1 flex flex-col items-center justify-start relative w-full max-w-7xl mx-auto px-4 pb-[420px] sm:pb-48 pt-4">
         <div className="w-full h-full flex flex-col gap-8">
             
             {isImageMode && uiVisible && (
@@ -907,23 +940,41 @@ function App() {
                                     </>
                                 ) : item.status === 'failed' ? (
                                      <>
-                                        <div className="w-12 h-12 rounded-full bg-red-900/20 border border-red-800/50 flex items-center justify-center mb-3">
-                                            <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center">
-                                                <div className="w-2 h-2 bg-red-400 rounded-full"></div>
+                                        <div className="w-full h-full flex flex-col items-center justify-center p-6 space-y-4 bg-gradient-to-br from-red-950/20 to-transparent">
+                                            <div className="relative">
+                                                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-red-900/40 to-red-950/40 border border-red-800/30 flex items-center justify-center backdrop-blur-sm shadow-lg">
+                                                    <svg className="w-10 h-10 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                    </svg>
+                                                </div>
+                                                <div className="absolute -bottom-1 -right-1 w-7 h-7 bg-red-500 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg border-2 border-nano-bg">
+                                                    ✕
+                                                </div>
+                                            </div>
+                                            <div className="text-center space-y-1.5">
+                                                <h4 className="text-base font-bold text-white">Generation Failed</h4>
+                                                {item.error && (
+                                                    <p className="text-[11px] text-red-300/80 line-clamp-2 max-w-[220px] leading-relaxed">{item.error}</p>
+                                                )}
+                                            </div>
+                                            <div className="flex gap-2.5 w-full px-2">
+                                                <button 
+                                                    onClick={() => retryQueueItem(item)} 
+                                                    className="flex-1 px-4 py-3 bg-gradient-to-r from-nano-accent via-nano-accent to-nano-accentHover text-nano-bg text-sm font-bold rounded-xl hover:shadow-xl hover:shadow-nano-accent/30 transition-all hover:scale-105 active:scale-95"
+                                                >
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        <span className="text-base">🔄</span>
+                                                        <span>Try Again</span>
+                                                    </div>
+                                                </button>
+                                                <button 
+                                                    onClick={() => cancelQueueItem(item.id)} 
+                                                    className="w-12 h-12 bg-zinc-800/80 hover:bg-red-900/50 border border-zinc-700 hover:border-red-800 text-zinc-400 hover:text-red-300 text-sm font-bold rounded-xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+                                                >
+                                                    ✕
+                                                </button>
                                             </div>
                                         </div>
-                                        <span className="text-red-300 text-sm font-medium mb-3">Generation Failed</span>
-                                        <div className="flex gap-3">
-                                            <button onClick={() => retryQueueItem(item)} className="px-3 py-1.5 bg-nano-accent/20 hover:bg-nano-accent/30 border border-nano-accent/50 text-nano-accent text-xs font-medium rounded-lg transition-colors">
-                                                Retry
-                                            </button>
-                                            <button onClick={() => cancelQueueItem(item.id)} className="px-3 py-1.5 bg-zinc-800/50 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 hover:text-zinc-300 text-xs font-medium rounded-lg transition-colors">
-                                                Remove
-                                            </button>
-                                        </div>
-                                        {item.error && (
-                                            <p className="text-[10px] text-red-400/70 px-3 text-center line-clamp-2 absolute bottom-2 w-full">{item.error}</p>
-                                        )}
                                     </>
                                 ) : (
                                     <>
@@ -978,27 +1029,27 @@ function App() {
         </div>
       </main>
 
-      <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 z-50 transition-all duration-500 ${uiVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
-        <div className="bg-nano-card/90 backdrop-blur-xl border border-zinc-800 p-2 rounded-2xl shadow-2xl flex flex-col gap-2">
+      <div className={`fixed bottom-2 sm:bottom-6 left-1/2 -translate-x-1/2 w-full max-w-4xl px-2 sm:px-4 z-50 transition-all duration-500 pointer-events-none ${uiVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+        <div className="bg-nano-card/95 backdrop-blur-2xl border border-zinc-700/50 p-1.5 sm:p-3 rounded-xl sm:rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col gap-1.5 sm:gap-2 pointer-events-auto max-h-[65vh] sm:max-h-[70vh] overflow-y-auto">
           
-          <div className="flex items-center gap-2 p-1">
-              <div className="flex-1 relative">
+          <div className="flex items-center gap-2 p-0.5 sm:p-1 flex-col sm:flex-row">
+              <div className="flex-1 relative w-full">
                   <input 
                       type="text" 
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
                       placeholder={isImageMode && sourceImages.length > 0 ? "Describe your edit..." : "Describe an image to generate..."}
-                      className="w-full bg-zinc-900/50 text-white placeholder-zinc-500 rounded-xl px-4 py-3 outline-none focus:ring-1 focus:ring-zinc-700 border border-transparent focus:border-zinc-700 transition-all"
+                      className="w-full bg-zinc-900/50 text-white placeholder-zinc-500 rounded-lg sm:rounded-xl px-3 sm:px-4 py-2 sm:py-3 outline-none focus:ring-1 focus:ring-zinc-700 border border-transparent focus:border-zinc-700 transition-all text-sm"
                       onKeyDown={(e) => e.key === 'Enter' && !e.ctrlKey && !e.metaKey && handleGenerate()}
                   />
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                      <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1.5 py-0.5 hidden sm:block">Shift+Enter</span>
+                      <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1.5 py-0.5 hidden md:block">Shift+Enter</span>
                   </div>
               </div>
               <button 
                   onClick={handleGenerate}
                   disabled={!prompt.trim()}
-                  className="h-12 px-6 bg-nano-accent hover:bg-nano-accentHover disabled:opacity-50 disabled:cursor-not-allowed text-nano-bg font-bold rounded-xl flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(204,255,0,0.2)]"
+                  className="h-11 sm:h-12 px-5 sm:px-6 w-full sm:w-auto bg-nano-accent hover:bg-nano-accentHover disabled:opacity-50 disabled:cursor-not-allowed text-nano-bg font-bold rounded-lg sm:rounded-xl flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(204,255,0,0.2)] text-sm whitespace-nowrap"
               >
                  {isProcessing ? 'Queue' : 'Generate'}
                  <IconSparkles />
@@ -1006,12 +1057,13 @@ function App() {
           </div>
 
           <div className="flex flex-wrap items-center justify-between px-2 pb-1 gap-2">
-              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar max-w-full">
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar w-full sm:w-auto">
                   <button 
                     onClick={() => setIsImageMode(!isImageMode)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${isImageMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-transparent border-zinc-800 text-zinc-400 hover:text-white'}`}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all whitespace-nowrap ${isImageMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-transparent border-zinc-800 text-zinc-400 hover:text-white'}`}
                   >
                      <span className="hidden sm:inline">Image Input</span>
+                     <span className="sm:hidden">Image</span>
                      {isImageMode ? <IconToggleRight /> : <IconToggleLeft />}
                   </button>
 
@@ -1026,31 +1078,31 @@ function App() {
                               resolution: e.target.value as any, 
                               modelType: (e.target.value === '1K' ? 'flash' : 'pro') 
                           }))} 
-                          className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-24"
+                          className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-20 sm:w-24"
                       >
-                          <option value="1K" className="bg-zinc-900 text-white">Standard (Fast)</option>
-                          <option value="2K" className="bg-zinc-900 text-white">HD (Pro)</option>
-                          <option value="4K" className="bg-zinc-900 text-white">4K (Pro)</option>
+                          <option value="1K" className="bg-zinc-900 text-white">Fast</option>
+                          <option value="2K" className="bg-zinc-900 text-white">HD</option>
+                          <option value="4K" className="bg-zinc-900 text-white">4K</option>
                       </select>
                   </div>
 
                   <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-1.5 border border-zinc-800 shrink-0">
                       <IconAspectRatio />
-                      <select value={settings.aspectRatio} onChange={(e) => setSettings(prev => ({...prev, aspectRatio: e.target.value}))} className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-16">
+                      <select value={settings.aspectRatio} onChange={(e) => setSettings(prev => ({...prev, aspectRatio: e.target.value}))} className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-14 sm:w-16">
                           {ASPECT_RATIOS.map(ratio => (<option key={ratio.value} value={ratio.value} className="bg-zinc-900 text-white">{ratio.label}</option>))}
                       </select>
                   </div>
 
                   <button 
                       onClick={() => setShowAdvanced(!showAdvanced)}
-                      className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-xs font-medium transition-all ${showAdvanced ? 'bg-nano-accent/20 border-nano-accent/50 text-nano-accent' : 'bg-transparent border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-600'}`}
+                      className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-xs font-medium transition-all whitespace-nowrap ${showAdvanced ? 'bg-nano-accent/20 border-nano-accent/50 text-nano-accent' : 'bg-transparent border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-600'}`}
                       title="Advanced Features"
                   >
                       ⚡ <span className="hidden sm:inline">Advanced</span>
                   </button>
               </div>
 
-               <div className="flex items-center gap-2">
+               <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                    <button onClick={() => setUiVisible(false)} className="flex items-center gap-2 px-3 py-1.5 bg-transparent border border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-600 rounded-lg text-xs font-medium transition-all" title="Hide UI (Shift + H)">
                       <IconEyeOff />
                   </button>
@@ -1159,7 +1211,7 @@ function App() {
       </div>
 
       {!uiVisible && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 opacity-80 hover:opacity-100 transition-opacity">
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] opacity-80 hover:opacity-100 transition-opacity">
               <div 
                   onClick={() => setUiVisible(true)}
                   className="bg-black/80 backdrop-blur-md border border-zinc-700 rounded-full px-4 py-2 shadow-2xl cursor-pointer hover:border-nano-accent transition-colors"
@@ -1396,6 +1448,9 @@ function App() {
                               onMouseMove={draw}
                               onMouseUp={stopDrawing}
                               onMouseLeave={stopDrawing}
+                              onTouchStart={startDrawing}
+                              onTouchMove={draw}
+                              onTouchEnd={stopDrawing}
                           />
                       )}
                   </div>
