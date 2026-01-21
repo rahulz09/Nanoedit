@@ -35,7 +35,6 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [isRestoring, setIsRestoring] = useState(true);
-  const [timer, setTimer] = useState(0);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [textResponse, setTextResponse] = useState<string | null>(null);
   const [hasApiKey, setHasApiKey] = useState(false);
@@ -45,6 +44,20 @@ function App() {
   // State for Full Screen Image Viewer
   const [viewedImage, setViewedImage] = useState<string | null>(null);
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [batchCount, setBatchCount] = useState(1);
+  const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+  const [brushMode, setBrushMode] = useState(false);
+  const [brushSize, setBrushSize] = useState(20);
+  const [selectedArea, setSelectedArea] = useState<string | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [brushTool, setBrushTool] = useState<'brush' | 'circle' | 'rectangle'>('brush');
+  const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // State for individual item timers
+  const [itemTimers, setItemTimers] = useState<Record<string, number>>({});
   
   // State for Zoom & Pan
   const [zoom, setZoom] = useState(1);
@@ -110,18 +123,26 @@ function App() {
       }
   }, [generatedImages, isRestoring]);
 
-  // Timer Effect for active processing
+  // Timer Effect for individual processing items
   useEffect(() => {
-      let interval: any;
-      if (isProcessing) {
-          interval = setInterval(() => {
-              setTimer(prev => prev + 0.1);
+      const processingItems = queue.filter(item => item.status === 'processing');
+      
+      if (processingItems.length > 0) {
+          const interval = setInterval(() => {
+              setItemTimers(prev => {
+                  const updated = { ...prev };
+                  processingItems.forEach(item => {
+                      updated[item.id] = (updated[item.id] || 0) + 0.1;
+                  });
+                  return updated;
+              });
           }, 100);
+          return () => clearInterval(interval);
       } else {
-          setTimer(0);
+          // Clear timers when no items are processing
+          setItemTimers({});
       }
-      return () => clearInterval(interval);
-  }, [isProcessing]);
+  }, [queue]);
 
   
   // Check for API Key on mount
@@ -144,58 +165,74 @@ function App() {
     checkKey();
   }, []);
 
-  // Queue Processing Logic
+  // Queue Processing Logic - Allow parallel processing
   useEffect(() => {
-      const processNextItem = async () => {
-          if (isProcessing) return;
-
-          // Find the next pending item (FIFO)
-          const nextItem = queue.find(item => item.status === 'pending');
-          if (!nextItem) return;
-
-          setIsProcessing(true);
-          setGlobalError(null);
+      const processNextItems = async () => {
+          // Find pending items (allow up to 2 parallel generations)
+          const processingCount = queue.filter(item => item.status === 'processing').length;
+          const maxParallel = 2;
           
-          // Update status to processing
-          setQueue(prev => prev.map(i => i.id === nextItem.id ? { ...i, status: 'processing' } : i));
+          if (processingCount >= maxParallel) return;
 
-          try {
-              const { images, text } = await editImageWithGemini(
-                  nextItem.sourceImages, 
-                  nextItem.prompt, 
-                  nextItem.settings
-              );
+          const pendingItems = queue.filter(item => item.status === 'pending').slice(0, maxParallel - processingCount);
+          if (pendingItems.length === 0) return;
 
-              if (images.length > 0) {
-                  const newImages: GeneratedImage[] = images.map(url => ({
-                      id: crypto.randomUUID(),
-                      url,
-                      prompt: nextItem.prompt,
-                      timestamp: Date.now()
-                  }));
-                  setGeneratedImages(prev => [...newImages, ...prev]);
-              }
-
-              if (text) {
-                  setTextResponse(text);
-              }
-
-              // Remove from queue on success
-              setQueue(prev => prev.filter(i => i.id !== nextItem.id));
-
-          } catch (err: any) {
-              const errorMessage = err.message || "Failed to generate image.";
-              setGlobalError(errorMessage);
+          // Process each pending item
+          pendingItems.forEach(async (nextItem) => {
+              setGlobalError(null);
               
-              // Update queue item to failed
-              setQueue(prev => prev.map(i => i.id === nextItem.id ? { ...i, status: 'failed', error: errorMessage } : i));
-          } finally {
-              setIsProcessing(false);
-          }
+              // Update status to processing
+              setQueue(prev => prev.map(i => i.id === nextItem.id ? { ...i, status: 'processing' } : i));
+
+              try {
+                  const { images, text } = await editImageWithGemini(
+                      nextItem.sourceImages, 
+                      nextItem.prompt, 
+                      nextItem.settings
+                  );
+
+                  if (images.length > 0) {
+                      const newImages: GeneratedImage[] = images.map(url => ({
+                          id: crypto.randomUUID(),
+                          url,
+                          prompt: nextItem.prompt,
+                          timestamp: Date.now()
+                      }));
+                      setGeneratedImages(prev => [...newImages, ...prev]);
+                  }
+
+                  if (text) {
+                      setTextResponse(text);
+                  }
+
+                  // Remove from queue on success
+                  setQueue(prev => prev.filter(i => i.id !== nextItem.id));
+                  
+                  // Clear timer for this item
+                  setItemTimers(prev => {
+                      const updated = { ...prev };
+                      delete updated[nextItem.id];
+                      return updated;
+                  });
+
+              } catch (err: any) {
+                  const errorMessage = err.message || "Failed to generate image.";
+                  setGlobalError(errorMessage);
+                  
+                  // Update queue item to failed
+                  setQueue(prev => prev.map(i => i.id === nextItem.id ? { ...i, status: 'failed', error: errorMessage } : i));
+              }
+          });
       };
 
-      processNextItem();
-  }, [queue, isProcessing]);
+      processNextItems();
+  }, [queue]);
+
+  // Update isProcessing state based on queue
+  useEffect(() => {
+      const processing = queue.some(item => item.status === 'processing');
+      setIsProcessing(processing);
+  }, [queue]);
 
 
   const handleConnectKey = async () => {
@@ -332,8 +369,11 @@ function App() {
   }, [settings, isImageMode, sourceImages]);
 
   const handleGenerate = useCallback(() => {
-    addToQueue(prompt);
-  }, [prompt, addToQueue]);
+    // Generate based on batch count setting
+    for (let i = 0; i < batchCount; i++) {
+      setTimeout(() => addToQueue(prompt), i * 100);
+    }
+  }, [prompt, addToQueue, batchCount]);
 
   const handleRemoveBackground = () => {
       if (!isImageMode || sourceImages.length === 0) {
@@ -341,8 +381,8 @@ function App() {
           setIsImageMode(true);
           return;
       }
-      // Strict prompt to preserve subject
-      const bgPrompt = "Edit this image: Replace the background with a clean white color. Keep the main subject exactly identical pixel-for-pixel. Do not regenerate the subject.";
+      // Professional background removal prompt for PNG output
+      const bgPrompt = "Create a professional cutout of the main subject from this image with transparent background. Remove all background elements completely while preserving the subject with perfect edge quality. Output as PNG format with transparency.";
       
       // Force Style to None and Model to Pro for better instruction following
       addToQueue(bgPrompt, { style: 'None', modelType: 'pro', resolution: '4K' });
@@ -359,7 +399,7 @@ function App() {
            const detectedRatio = detectAspectRatio(img.width, img.height);
            setSettings(prev => ({ ...prev, aspectRatio: detectedRatio }));
            
-           const bgPrompt = "Edit this image: Replace the background with a clean white color. Keep the main subject exactly identical pixel-for-pixel. Do not regenerate the subject.";
+           const bgPrompt = "Create a professional cutout of the main subject from this image with transparent background. Remove all background elements completely while preserving the subject with perfect edge quality. Output as PNG format with transparency.";
            setTimeout(() => addToQueue(bgPrompt, { style: 'None', aspectRatio: detectedRatio, modelType: 'pro', resolution: '4K' }), 100);
       };
       img.src = imageUrl;
@@ -378,8 +418,100 @@ function App() {
       if (viewedImage) setViewedImage(null);
   };
   
+  const clearAllGeneratedImages = () => {
+    if (window.confirm('Clear all generated images? This cannot be undone.')) {
+      setGeneratedImages([]);
+      setTextResponse(null);
+    }
+  };
+
+  const copyPromptFromImage = (imagePrompt: string, imageId: string) => {
+    setPrompt(imagePrompt);
+    setCopiedPromptId(imageId);
+    setTimeout(() => setCopiedPromptId(null), 2000);
+  };
+
+  const handleBrushSelect = (imageUrl: string) => {
+    setBrushMode(true);
+    setSelectedArea(imageUrl);
+    setViewedImage(imageUrl);
+  };
+
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!brushMode || !canvasRef.current) return;
+    setIsDrawing(true);
+    
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    
+    if (brushTool === 'brush') {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+      }
+    } else {
+      setShapeStart({ x, y });
+    }
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !brushMode || !canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (brushTool === 'brush') {
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    } else if (shapeStart) {
+      // Clear and redraw for shape preview
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 3;
+      
+      if (brushTool === 'circle') {
+        const radius = Math.sqrt(Math.pow(x - shapeStart.x, 2) + Math.pow(y - shapeStart.y, 2));
+        ctx.beginPath();
+        ctx.arc(shapeStart.x, shapeStart.y, radius, 0, 2 * Math.PI);
+        ctx.stroke();
+      } else if (brushTool === 'rectangle') {
+        ctx.strokeRect(shapeStart.x, shapeStart.y, x - shapeStart.x, y - shapeStart.y);
+      }
+    }
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+    setShapeStart(null);
+  };
+
+  const clearBrushSelection = () => {
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
+    }
+  };
+  
   const cancelQueueItem = (id: string) => {
       setQueue(prev => prev.filter(item => item.id !== id));
+  };
+
+  const retryQueueItem = (item: QueueItem) => {
+      setQueue(prev => prev.map(i => i.id === item.id ? { ...i, status: 'pending', error: undefined } : i));
   };
 
   // Short filename generator
@@ -492,8 +624,8 @@ function App() {
 
   // Mouse Pan Handlers
   const handleMouseDown = (e: React.MouseEvent) => {
-      // Allow drag if zoomed in OR if specifically testing (removed zoom>1 check for flexibility if needed, but keeping it for UX)
-      if (zoom > 1) {
+      // Allow drag if zoomed in and not in brush mode
+      if (zoom > 1 && !brushMode) {
           e.preventDefault(); 
           setIsDragging(true);
           dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
@@ -501,7 +633,7 @@ function App() {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-      if (isDragging && zoom > 1) {
+      if (isDragging && zoom > 1 && !brushMode) {
           e.preventDefault();
           setPan({
               x: e.clientX - dragStartRef.current.x,
@@ -562,11 +694,11 @@ function App() {
       initialPinchDistanceRef.current = null;
   };
 
-  // Keyboard Shortcuts - Apple Magic Keyboard compatible
+  // Keyboard Shortcuts - Shift based
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        // Cmd/Ctrl + Enter: Generate
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        // Shift + Enter: Generate
+        if (e.shiftKey && e.key === 'Enter') {
             if (prompt.trim()) {
                 handleGenerate();
             }
@@ -579,53 +711,72 @@ function App() {
                clearAllSourceImages();
            }
         }
-        // Cmd/Ctrl + S: Save/Download first image
-        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        // Shift + S: Save/Download first image
+        if (e.shiftKey && e.key === 'S') {
             e.preventDefault(); 
             if (generatedImages.length > 0) {
                 downloadImage(generatedImages[0].url);
             }
         }
-        // Cmd/Ctrl + .: Toggle UI
-        if ((e.ctrlKey || e.metaKey) && e.key === '.') {
+        // Shift + H: Toggle UI
+        if (e.shiftKey && e.key === 'H') {
             e.preventDefault();
             setUiVisible(prev => !prev);
         }
-        // Cmd/Ctrl + U: Upload image
-        if ((e.ctrlKey || e.metaKey) && e.key === 'u') {
+        // Shift + U: Upload image
+        if (e.shiftKey && e.key === 'U') {
             e.preventDefault();
             triggerFileUpload();
         }
-        // Cmd/Ctrl + I: Toggle Image Mode
-        if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
+        // Shift + I: Toggle Image Mode
+        if (e.shiftKey && e.key === 'I') {
             e.preventDefault();
             setIsImageMode(prev => !prev);
         }
-        // Cmd/Ctrl + Shift + S: Download all as ZIP
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 's') {
+        // Shift + A: Download all as ZIP
+        if (e.shiftKey && e.key === 'A') {
             e.preventDefault();
             if (generatedImages.length > 0) {
                 handleDownloadAll();
             }
         }
-        // Cmd/Ctrl + B: Remove background (white)
-        if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+        // Shift + B: Remove background
+        if (e.shiftKey && e.key === 'B') {
             e.preventDefault();
             if (isImageMode && sourceImages.length > 0) {
                 handleRemoveBackground();
             }
         }
-        // Cmd/Ctrl + K: Clear prompt
-        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        // Shift + K: Clear prompt
+        if (e.shiftKey && e.key === 'K') {
             e.preventDefault();
             setPrompt('');
         }
-        // Cmd/Ctrl + D: Duplicate last generated to layers
-        if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        // Shift + D: Duplicate last generated to layers
+        if (e.shiftKey && e.key === 'D') {
             e.preventDefault();
             if (generatedImages.length > 0) {
                 addToLayers(generatedImages[0].url);
             }
+        }
+        // Shift + D: Duplicate last generated to layers
+        if (e.shiftKey && e.key === 'D') {
+            e.preventDefault();
+            if (generatedImages.length > 0) {
+                addToLayers(generatedImages[0].url);
+            }
+        }
+        // Shift + C: Clear canvas
+        if (e.shiftKey && e.key === 'C') {
+            e.preventDefault();
+            if (generatedImages.length > 0) {
+                clearAllGeneratedImages();
+            }
+        }
+        // Shift + ?: Toggle Help
+        if (e.shiftKey && e.key === '?') {
+            e.preventDefault();
+            setShowHelp(prev => !prev);
         }
     };
 
@@ -696,6 +847,9 @@ function App() {
                         {sourceImages.map((img, idx) => (
                             <div key={idx} className="relative group shrink-0 w-24 h-24 rounded-xl overflow-hidden shadow-lg border border-zinc-800">
                                 <img src={img} alt={`Source ${idx}`} className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform duration-300" onClick={() => setViewedImage(img)} />
+                                <div className="absolute top-1 left-1 bg-nano-accent text-nano-bg text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                                    {idx + 1}
+                                </div>
                                 <button 
                                     onClick={() => removeSourceImage(idx)}
                                     className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-red-500/80 rounded-full text-white backdrop-blur-md transition-colors opacity-0 group-hover:opacity-100"
@@ -705,16 +859,6 @@ function App() {
                             </div>
                         ))}
                     </div>
-                </div>
-            )}
-
-            {globalError && uiVisible && (
-                <div className="w-full max-w-2xl mx-auto bg-red-900/20 border border-red-800 text-red-200 px-4 py-3 rounded-lg text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                    <div className="flex-1"><span className="font-bold block sm:inline mr-1">Error:</span> <span className="break-words">{globalError}</span></div>
-                    {(globalError.includes("403") || globalError.includes("PERMISSION_DENIED")) && (
-                         <button onClick={async () => { if(window.aistudio && window.aistudio.openSelectKey) { await window.aistudio.openSelectKey(); setGlobalError(null); } }} className="shrink-0 mt-2 sm:mt-0 px-3 py-1 bg-red-800 hover:bg-red-700 text-white rounded text-xs font-bold transition-colors">Change API Key</button>
-                    )}
-                     <button onClick={() => setGlobalError(null)} className="shrink-0 p-1 hover:text-white"><IconX /></button>
                 </div>
             )}
 
@@ -741,30 +885,45 @@ function App() {
                 <div className="w-full">
                     <h3 className={`text-zinc-500 text-sm font-medium mb-4 uppercase tracking-wider flex items-center justify-between transition-opacity ${uiVisible ? 'opacity-100' : 'opacity-0'}`}>
                         <span>
-                            {isProcessing ? `Generating (${timer.toFixed(1)}s)...` : 'Gallery'} 
+                            {isProcessing ? `Generating...` : 'Gallery'} 
                             {queue.length > 0 && !isProcessing && <span className="text-zinc-600 ml-2">({queue.length} in queue)</span>}
                         </span>
-                        <div className="flex items-center gap-3">
-                            <span className="text-xs normal-case text-zinc-600 hidden sm:inline">Cmd/Ctrl+S to save</span>
-                        </div>
                     </h3>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full animate-fade-in-up">
                         
-                        {/* Queue Items Rendering */}
-                        {queue.map((item, idx) => (
+                        {/* Queue Items Rendering - Sort to show failed items last */}
+                        {[...queue].sort((a, b) => {
+                            if (a.status === 'failed' && b.status !== 'failed') return 1;
+                            if (a.status !== 'failed' && b.status === 'failed') return -1;
+                            return 0;
+                        }).map((item, idx) => (
                              <div key={item.id} className="relative aspect-square rounded-xl bg-zinc-900 border border-zinc-800 flex flex-col items-center justify-center gap-3 shadow-[0_0_15px_rgba(204,255,0,0.05)] overflow-hidden">
                                 {item.status === 'processing' ? (
                                     <>
                                         <div className="w-10 h-10 border-2 border-nano-accent border-t-transparent rounded-full animate-spin"></div>
-                                        <span className="text-nano-accent text-sm font-mono">{timer.toFixed(1)}s</span>
+                                        <span className="text-nano-accent text-sm font-mono">{(itemTimers[item.id] || 0).toFixed(1)}s</span>
                                         <p className="text-xs text-zinc-500 px-4 text-center line-clamp-1 absolute bottom-4 w-full">{item.prompt}</p>
                                     </>
                                 ) : item.status === 'failed' ? (
                                      <>
-                                        <div className="text-red-500 mb-2"><IconX /></div>
-                                        <span className="text-red-400 text-xs font-bold">Failed</span>
-                                        <button onClick={() => cancelQueueItem(item.id)} className="mt-2 text-[10px] underline text-zinc-500 hover:text-zinc-300">Dismiss</button>
+                                        <div className="w-12 h-12 rounded-full bg-red-900/20 border border-red-800/50 flex items-center justify-center mb-3">
+                                            <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center">
+                                                <div className="w-2 h-2 bg-red-400 rounded-full"></div>
+                                            </div>
+                                        </div>
+                                        <span className="text-red-300 text-sm font-medium mb-3">Generation Failed</span>
+                                        <div className="flex gap-3">
+                                            <button onClick={() => retryQueueItem(item)} className="px-3 py-1.5 bg-nano-accent/20 hover:bg-nano-accent/30 border border-nano-accent/50 text-nano-accent text-xs font-medium rounded-lg transition-colors">
+                                                Retry
+                                            </button>
+                                            <button onClick={() => cancelQueueItem(item.id)} className="px-3 py-1.5 bg-zinc-800/50 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 hover:text-zinc-300 text-xs font-medium rounded-lg transition-colors">
+                                                Remove
+                                            </button>
+                                        </div>
+                                        {item.error && (
+                                            <p className="text-[10px] text-red-400/70 px-3 text-center line-clamp-2 absolute bottom-2 w-full">{item.error}</p>
+                                        )}
                                     </>
                                 ) : (
                                     <>
@@ -789,9 +948,23 @@ function App() {
                             <div key={img.id} className="relative group rounded-xl overflow-hidden bg-nano-card border border-zinc-800 aspect-square flex items-center justify-center">
                                 <img src={img.url} alt={img.prompt} className="w-full h-full object-cover cursor-pointer" onClick={() => setViewedImage(img.url)} />
                                 <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-4 transition-all duration-300 ${uiVisible ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                                    <p className="text-xs text-white/90 line-clamp-2 mb-3 font-medium">{img.prompt}</p>
-                                    <div className="grid grid-cols-4 gap-2">
+                                    <p 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            copyPromptFromImage(img.prompt, img.id);
+                                        }}
+                                        className={`text-xs line-clamp-2 mb-3 font-medium cursor-pointer transition-all ${
+                                            copiedPromptId === img.id 
+                                                ? 'text-nano-accent' 
+                                                : 'text-white/90'
+                                        }`}
+                                        title="Click to copy prompt"
+                                    >
+                                        {copiedPromptId === img.id ? '✓ Copied!' : img.prompt}
+                                    </p>
+                                    <div className="grid grid-cols-5 gap-2">
                                          <button onClick={() => setViewedImage(img.url)} className="px-2 py-2 bg-zinc-800 text-white text-xs font-bold rounded-lg hover:bg-zinc-700 flex items-center justify-center transition-colors" title="View Fullscreen"><IconEye /></button>
+                                        <button onClick={() => handleBrushSelect(img.url)} className="px-2 py-2 bg-purple-900/50 text-purple-200 text-xs font-bold rounded-lg hover:bg-purple-900 flex items-center justify-center transition-colors" title="Brush Edit">🖌️</button>
                                         <button onClick={() => addToLayers(img.url)} className="px-2 py-2 bg-nano-accent text-nano-bg text-xs font-bold rounded-lg hover:bg-nano-accentHover flex items-center justify-center transition-colors" title="Add Layer"><IconLayerPlus /></button>
                                         <button onClick={() => downloadImage(img.url)} className="px-2 py-2 bg-zinc-800 text-white text-xs font-bold rounded-lg hover:bg-zinc-700 flex items-center justify-center transition-colors" title="Download"><IconDownload /></button>
                                         <button onClick={() => deleteGeneratedImage(img.id)} className="px-2 py-2 bg-red-900/50 text-red-200 text-xs font-bold rounded-lg hover:bg-red-900 flex items-center justify-center transition-colors" title="Delete"><IconTrash /></button>
@@ -819,7 +992,7 @@ function App() {
                       onKeyDown={(e) => e.key === 'Enter' && !e.ctrlKey && !e.metaKey && handleGenerate()}
                   />
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                      <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1.5 py-0.5 hidden sm:block">Cmd/Ctrl+Enter</span>
+                      <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1.5 py-0.5 hidden sm:block">Shift+Enter</span>
                   </div>
               </div>
               <button 
@@ -868,6 +1041,29 @@ function App() {
                       </select>
                   </div>
 
+                  <button 
+                      onClick={() => setShowAdvanced(!showAdvanced)}
+                      className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-xs font-medium transition-all ${showAdvanced ? 'bg-nano-accent/20 border-nano-accent/50 text-nano-accent' : 'bg-transparent border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-600'}`}
+                      title="Advanced Features"
+                  >
+                      ⚡ <span className="hidden sm:inline">Advanced</span>
+                  </button>
+              </div>
+
+               <div className="flex items-center gap-2">
+                   <button onClick={() => setUiVisible(false)} className="flex items-center gap-2 px-3 py-1.5 bg-transparent border border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-600 rounded-lg text-xs font-medium transition-all" title="Hide UI (Shift + H)">
+                      <IconEyeOff />
+                  </button>
+
+                  <button onClick={() => setShowHelp(!showHelp)} className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-xs font-medium transition-all ${showHelp ? 'bg-nano-accent/20 border-nano-accent/50 text-nano-accent' : 'bg-transparent border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-600'}`} title="Help & Shortcuts (Shift + ?)">
+                      ?
+                  </button>
+               </div>
+          </div>
+
+          {/* Advanced Features Row */}
+          {showAdvanced && (
+              <div className="flex flex-wrap items-center gap-2 px-2 pb-2 border-t border-zinc-800/50 pt-2">
                    <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-1.5 border border-zinc-800 shrink-0">
                       <IconPalette />
                       <select value={settings.style} onChange={(e) => setSettings(prev => ({...prev, style: e.target.value}))} className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-20">
@@ -882,8 +1078,8 @@ function App() {
                       </select>
                   </div>
 
-                  {/* Quick Actions Dropdown */}
-                  <div className="flex items-center gap-2 bg-nano-accent/10 rounded-lg px-3 py-1.5 border border-nano-accent/30 shrink-0">
+                  {/* Quick Actions & More Features */}
+                  <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-1.5 border border-zinc-800 shrink-0">
                       <IconSparkles />
                       <select 
                           value="" 
@@ -899,7 +1095,7 @@ function App() {
                                   }
                               }
                           }} 
-                          className="bg-transparent text-xs font-medium text-nano-accent outline-none cursor-pointer w-24"
+                          className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-24"
                       >
                           <option value="" className="bg-zinc-900 text-white">Quick Actions</option>
                           {PRESET_PROMPTS.map(preset => (
@@ -909,6 +1105,30 @@ function App() {
                           ))}
                       </select>
                   </div>
+
+                  {/* Batch Generation Toggle */}
+                  <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-1.5 border border-zinc-800 shrink-0">
+                      <IconLayers />
+                      <select 
+                          value={batchCount}
+                          onChange={(e) => setBatchCount(parseInt(e.target.value))}
+                          className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-16"
+                      >
+                          <option value="1" className="bg-zinc-900 text-white">1x Gen</option>
+                          <option value="2" className="bg-zinc-900 text-white">2x Gen</option>
+                          <option value="3" className="bg-zinc-900 text-white">3x Gen</option>
+                          <option value="4" className="bg-zinc-900 text-white">4x Gen</option>
+                      </select>
+                  </div>
+
+                  {/* Random Seed */}
+                  <button 
+                      onClick={() => setPrompt(prev => prev + (prev ? ', ' : '') + 'random seed variation')}
+                      className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 rounded-lg px-3 py-1.5 border border-zinc-800 shrink-0 text-xs font-medium text-zinc-300 transition-colors"
+                      title="Add Random Variation"
+                  >
+                      🎲 <span className="hidden sm:inline">Random</span>
+                  </button>
 
                   {/* Remove Background Button */}
                   {isImageMode && sourceImages.length > 0 && (
@@ -927,18 +1147,65 @@ function App() {
                           <IconZip /> <span className="hidden sm:inline">Download All</span>
                       </button>
                   )}
-              </div>
 
-               <button onClick={() => setUiVisible(false)} className="flex items-center gap-2 px-3 py-1.5 bg-transparent border border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-600 rounded-lg text-xs font-medium transition-all" title="Hide UI (Cmd/Ctrl + .)">
-                  <IconEyeOff />
-              </button>
-          </div>
+                  {generatedImages.length > 0 && (
+                      <button onClick={clearAllGeneratedImages} className="flex items-center gap-2 bg-zinc-900 hover:bg-red-900 rounded-lg px-3 py-1.5 border border-zinc-800 hover:border-red-800 shrink-0 text-xs font-medium text-zinc-400 hover:text-red-400 transition-colors" title="Clear Canvas">
+                          <IconTrash /> <span className="hidden sm:inline">Clear Canvas</span>
+                      </button>
+                  )}
+              </div>
+          )}
         </div>
       </div>
 
       {!uiVisible && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 opacity-50 hover:opacity-100 transition-opacity">
-              <span className="text-[10px] text-zinc-500 bg-black/50 backdrop-blur px-2 py-1 rounded-full">Cmd/Ctrl + . to show controls</span>
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 opacity-80 hover:opacity-100 transition-opacity">
+              <div 
+                  onClick={() => setUiVisible(true)}
+                  className="bg-black/80 backdrop-blur-md border border-zinc-700 rounded-full px-4 py-2 shadow-2xl cursor-pointer hover:border-nano-accent transition-colors"
+              >
+                  <span className="text-xs text-zinc-300 font-medium">Press Shift + H to show controls</span>
+              </div>
+          </div>
+      )}
+
+      {/* Help Panel */}
+      {showHelp && uiVisible && (
+          <div className="fixed inset-0 z-[90] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
+              <div className="bg-nano-card border border-zinc-700 rounded-2xl p-6 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-bold text-white">Shortcuts & Help</h3>
+                      <button onClick={() => setShowHelp(false)} className="p-1 text-zinc-500 hover:text-white"><IconX /></button>
+                  </div>
+                  <div className="space-y-3 text-sm">
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="space-y-1">
+                              <div className="flex justify-between"><span className="text-zinc-400">Generate</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧↵</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Upload</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧U</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Save First</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧S</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Save All</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧A</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Remove BG</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧B</kbd></div>
+                          </div>
+                          <div className="space-y-1">
+                              <div className="flex justify-between"><span className="text-zinc-400">Toggle Mode</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧I</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Hide UI</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧H</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Clear</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">Esc</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Clear Prompt</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧K</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Add Layer</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧D</kbd></div>
+                              <div className="flex justify-between"><span className="text-zinc-400">Clear Canvas</span><kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-nano-accent">⇧C</kbd></div>
+                          </div>
+                      </div>
+                      <div className="border-t border-zinc-700 pt-3">
+                          <h4 className="text-xs font-semibold text-zinc-400 mb-2">Quick Tips</h4>
+                          <ul className="text-xs text-zinc-500 space-y-1">
+                              <li>• Use Image Mode for editing uploaded photos</li>
+                              <li>• Higher resolution = Pro model (better quality)</li>
+                              <li>• Drag & drop images to upload</li>
+                              <li>• Click images to view fullscreen</li>
+                          </ul>
+                      </div>
+                  </div>
+              </div>
           </div>
       )}
 
@@ -948,11 +1215,111 @@ function App() {
       </div>
 
       {viewedImage && (
-          <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setViewedImage(null)}>
-              <button className={`absolute top-4 right-4 p-2 bg-zinc-800/50 hover:bg-zinc-700 rounded-full text-white transition-opacity ${uiVisible ? 'opacity-100' : 'opacity-0 hover:opacity-100'}`} onClick={() => setViewedImage(null)}><IconX /></button>
-              
+          <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-4" onClick={() => { setViewedImage(null); setBrushMode(false); setSelectedArea(null); }}>
+              <button className="absolute top-4 right-4 z-[120] p-2 bg-zinc-800/80 hover:bg-zinc-700 rounded-full text-white transition-colors backdrop-blur-sm" onClick={() => { setViewedImage(null); setBrushMode(false); setSelectedArea(null); }}><IconX /></button>
+
+              {/* Brush Controls */}
+              {brushMode && (
+                  <div className="absolute top-6 left-6 z-[120] bg-black/80 backdrop-blur-xl border border-white/20 rounded-2xl p-4 shadow-2xl w-64" onClick={e => e.stopPropagation()}>
+                      <h3 className="text-white text-sm font-bold mb-4">🎨 Selection Tools</h3>
+                      
+                      <div className="space-y-4">
+                          {/* Tool Selection */}
+                          <div>
+                              <label className="text-xs text-zinc-300 block mb-2">Tool</label>
+                              <div className="grid grid-cols-3 gap-2">
+                                  <button 
+                                      onClick={() => setBrushTool('brush')}
+                                      className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${brushTool === 'brush' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                                  >
+                                      🖌️ Brush
+                                  </button>
+                                  <button 
+                                      onClick={() => setBrushTool('circle')}
+                                      className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${brushTool === 'circle' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                                  >
+                                      ⭕ Circle
+                                  </button>
+                                  <button 
+                                      onClick={() => setBrushTool('rectangle')}
+                                      className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${brushTool === 'rectangle' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                                  >
+                                      ▭ Box
+                                  </button>
+                              </div>
+                          </div>
+
+                          {/* Brush Size */}
+                          {brushTool === 'brush' && (
+                              <div>
+                                  <label className="text-xs text-zinc-300 block mb-2">Size: {brushSize}px</label>
+                                  <input 
+                                      type="range" 
+                                      min="5" 
+                                      max="50" 
+                                      value={brushSize}
+                                      onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                                      className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                  />
+                              </div>
+                          )}
+
+                          {/* Instructions */}
+                          <div className="text-[10px] text-zinc-400 bg-white/5 rounded-lg p-2 leading-relaxed">
+                              Draw white outline on the area you want to edit
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex gap-2">
+                              <button 
+                                  onClick={clearBrushSelection}
+                                  className="flex-1 px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded-lg transition-all"
+                              >
+                                  Clear
+                              </button>
+                              <button 
+                                  onClick={() => {
+                                      const prompt = "Edit only the white outlined area: ";
+                                      setPrompt(prompt);
+                                      setBrushMode(false);
+                                      setViewedImage(null);
+                                      setIsImageMode(true);
+                                      
+                                      if (canvasRef.current && selectedArea) {
+                                          const canvas = canvasRef.current;
+                                          const tempCanvas = document.createElement('canvas');
+                                          const tempCtx = tempCanvas.getContext('2d');
+                                          
+                                          if (tempCtx) {
+                                              const img = new Image();
+                                              img.onload = () => {
+                                                  tempCanvas.width = img.width;
+                                                  tempCanvas.height = img.height;
+                                                  tempCtx.drawImage(img, 0, 0);
+                                                  tempCtx.drawImage(canvas, 0, 0);
+                                                  setSourceImages([tempCanvas.toDataURL('image/png')]);
+                                              };
+                                              img.src = selectedArea;
+                                          }
+                                      }
+                                  }}
+                                  className="flex-1 px-3 py-2 bg-white hover:bg-white/90 text-black text-xs font-bold rounded-lg transition-all"
+                              >
+                                  Apply
+                              </button>
+                              <button 
+                                  onClick={() => { setBrushMode(false); setViewedImage(null); }}
+                                  className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded-lg transition-all"
+                              >
+                                  ✕
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
+
               {/* Enhanced Zoom & Pan Controls Overlay */}
-              <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 p-2 pl-4 pr-4 bg-zinc-900/90 backdrop-blur-md border border-zinc-700 rounded-full shadow-2xl z-[110] transition-all hover:bg-zinc-900" onClick={e => e.stopPropagation()}>
+              <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-3 p-2 pl-4 pr-4 bg-zinc-900/90 backdrop-blur-md border border-zinc-700 rounded-full shadow-2xl transition-all hover:bg-zinc-900" onClick={e => e.stopPropagation()}>
                    <button onClick={handleZoomOut} className="text-zinc-400 hover:text-white transition-colors disabled:opacity-50" disabled={zoom <= 0.5} title="Zoom Out"><IconZoomOut /></button>
                    
                    <input 
@@ -975,7 +1342,7 @@ function App() {
               </div>
 
               <div 
-                  className={`w-full h-full overflow-hidden flex items-center justify-center ${zoom > 1 ? 'cursor-move' : 'cursor-default'}`} 
+                  className={`w-full h-full overflow-hidden flex items-center justify-center relative ${zoom > 1 && !brushMode ? 'cursor-move' : ''}`}
                   onClick={e => e.stopPropagation()}
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
@@ -993,25 +1360,49 @@ function App() {
                         <span>Failed to load image preview</span>
                     </div>
                  ) : (
-                  <img 
-                      key={viewedImage}
-                      src={viewedImage} 
-                      alt="Full View" 
-                      className="origin-center select-none block"
-                      style={{ 
-                          transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
-                          maxWidth: '100%',
-                          maxHeight: '100%',
-                          objectFit: 'contain',
-                          transition: isDragging ? 'none' : 'transform 0.1s ease-out' 
-                      }}
-                      draggable={false}
-                      onError={() => setImageLoadError(true)}
-                  />
+                  <div className="relative inline-block">
+                      <img 
+                          key={viewedImage}
+                          src={viewedImage} 
+                          alt="Full View" 
+                          className="origin-center select-none block"
+                          style={{ 
+                              transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+                              maxWidth: '90vw',
+                              maxHeight: '80vh',
+                              transition: isDragging ? 'none' : 'transform 0.1s ease-out'
+                          }}
+                          draggable={false}
+                          onError={() => setImageLoadError(true)}
+                          onLoad={(e) => {
+                              if (brushMode && canvasRef.current) {
+                                  const img = e.target as HTMLImageElement;
+                                  const canvas = canvasRef.current;
+                                  canvas.width = img.naturalWidth;
+                                  canvas.height = img.naturalHeight;
+                              }
+                          }}
+                      />
+                      {brushMode && (
+                          <canvas
+                              ref={canvasRef}
+                              className="absolute top-0 left-0 w-full h-full cursor-crosshair"
+                              style={{ 
+                                  transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+                                  transformOrigin: 'center',
+                                  transition: isDragging ? 'none' : 'transform 0.1s ease-out'
+                              }}
+                              onMouseDown={startDrawing}
+                              onMouseMove={draw}
+                              onMouseUp={stopDrawing}
+                              onMouseLeave={stopDrawing}
+                          />
+                      )}
+                  </div>
                  )}
               </div>
 
-              <div className={`absolute bottom-4 right-4 flex gap-2 transition-opacity duration-300 ${uiVisible ? 'opacity-100' : 'opacity-0'}`} onClick={e => e.stopPropagation()}>
+              <div className="absolute bottom-4 right-4 z-[120] flex gap-2 transition-opacity duration-300" onClick={e => e.stopPropagation()}>
                    <button onClick={() => handleViewerRemoveBg(viewedImage!)} className="px-4 py-2 bg-zinc-800 text-zinc-300 text-sm font-medium rounded-lg hover:bg-zinc-700 flex items-center gap-2 transition-colors border border-zinc-700" title="Use to Remove Background"><IconEraser /> Remove BG</button>
                    <button onClick={() => downloadImage(viewedImage!)} className="px-4 py-2 bg-nano-card/80 backdrop-blur text-white text-sm font-bold rounded-lg hover:bg-zinc-700 flex items-center gap-2 transition-colors border border-zinc-700"><IconDownload /> Save</button>
               </div>

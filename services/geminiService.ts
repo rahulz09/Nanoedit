@@ -93,6 +93,7 @@ export const editImageWithGemini = async (
   // Construct the configuration
   // IMPORTANT: aspectRatio is part of imageConfig.
   const config: any = {
+    responseModalities: ['TEXT', 'IMAGE'],
     imageConfig: {
       aspectRatio: settings.aspectRatio,
     }

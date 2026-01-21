@@ -72,17 +72,17 @@ export const PRESET_PROMPTS = [
   {
     label: 'White BG',
     icon: '⬜',
-    prompt: 'Edit this image: Replace the background with a clean pure white color (#FFFFFF). Keep the main subject exactly identical pixel-for-pixel. Do not regenerate or modify the subject.',
+    prompt: 'Change the background of this image to pure white (#FFFFFF). Keep the main subject completely unchanged with clean, natural edges. Preserve all details, colors, and lighting of the subject.',
   },
   {
     label: 'Black BG',
     icon: '⬛',
-    prompt: 'Edit this image: Replace the background with a pure black color (#000000). Keep the main subject exactly identical pixel-for-pixel. Do not regenerate or modify the subject.',
+    prompt: 'Change the background of this image to pure black (#000000). Keep the main subject completely unchanged with clean, natural edges. Preserve all details, colors, and lighting of the subject.',
   },
   {
     label: 'Transparent BG',
     icon: '🔲',
-    prompt: 'Edit this image: Remove the background completely, making it transparent. Keep the main subject with clean edges exactly as it is. Do not modify or regenerate the subject.',
+    prompt: 'Create a professional cutout of the main subject from this image with transparent background. Remove all background elements completely while preserving the subject with perfect edge quality. Output as PNG format with transparency.',
   },
   {
     label: 'Enhance',
