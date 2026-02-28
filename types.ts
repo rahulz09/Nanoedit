@@ -2,7 +2,7 @@
 export interface EditorSettings {
   aspectRatio: string;
   resolution: '1K' | '2K' | '4K'; // 1K is default/Flash. 2K/4K triggers Pro.
-  modelType: 'flash' | 'pro';
+  modelType: 'flash' | 'pro' | 'nano2';
   style: string;
   cameraAngle: string;
 }

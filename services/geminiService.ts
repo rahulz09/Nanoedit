@@ -84,6 +84,11 @@ export const editImageWithGemini = async (
   // Default to Flash for speed and general editing/generation
   let modelName = 'gemini-2.5-flash-image';
   
+  // Use Nano Banana 2 if explicitly selected
+  if (settings.modelType === 'nano2') {
+    modelName = 'gemini-3.1-flash-image';
+  }
+  
   // Upgrade to Pro if high resolution is requested
   const isPro = settings.resolution === '2K' || settings.resolution === '4K' || settings.modelType === 'pro';
   if (isPro) {
