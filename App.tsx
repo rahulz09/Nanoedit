@@ -13,12 +13,12 @@ function App() {
   const [isImageMode, setIsImageMode] = useState(() => getFromLocalStorage('nano_is_image_mode', false));
   const [uiVisible, setUiVisible] = useState(() => getFromLocalStorage('nano_ui_visible', true));
   
-  // Settings initialization - Defaulting to 4K/Pro as requested, ensuring all fields exist
+  // Settings initialization - Defaulting to Nano 2 model
   const [settings, setSettings] = useState<EditorSettings>(() => {
       const defaults: EditorSettings = {
         aspectRatio: '16:9',
         resolution: '4K',
-        modelType: 'pro',
+        modelType: 'nano2',
         style: 'None',
         cameraAngle: 'None'
       };
@@ -1072,17 +1072,13 @@ function App() {
                   <div className="flex items-center gap-2 bg-zinc-900 rounded-lg px-3 py-1.5 border border-zinc-800 shrink-0">
                       <IconSettings />
                       <select 
-                          value={settings.resolution} 
-                          onChange={(e) => setSettings(prev => ({
-                              ...prev, 
-                              resolution: e.target.value as any, 
-                              modelType: (e.target.value === '1K' ? 'flash' : 'pro') 
-                          }))} 
+                          value={settings.modelType} 
+                          onChange={(e) => setSettings(prev => ({...prev, modelType: e.target.value as any}))} 
                           className="bg-transparent text-xs font-medium text-white outline-none cursor-pointer w-20 sm:w-24"
                       >
-                          <option value="1K" className="bg-zinc-900 text-white">Fast</option>
-                          <option value="2K" className="bg-zinc-900 text-white">HD</option>
-                          <option value="4K" className="bg-zinc-900 text-white">4K</option>
+                          <option value="flash" className="bg-zinc-900 text-white">Flash</option>
+                          <option value="nano2" className="bg-zinc-900 text-white">Nano 2</option>
+                          <option value="pro" className="bg-zinc-900 text-white">Pro</option>
                       </select>
                   </div>
 
